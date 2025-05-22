@@ -1,6 +1,3 @@
-> [!IMPORTANT]
-> This application is currently under development. A known issue exists where **a browser opens for every API call**.
-
 # Bear MCP Server
 [![Python Application](https://github.com/jkawamoto/mcp-bear/actions/workflows/python-app.yaml/badge.svg)](https://github.com/jkawamoto/mcp-bear/actions/workflows/python-app.yaml)
 [![GitHub License](https://img.shields.io/github/license/jkawamoto/mcp-bear)](https://github.com/jkawamoto/mcp-bear/blob/main/LICENSE)
