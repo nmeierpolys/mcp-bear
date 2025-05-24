@@ -30,7 +30,12 @@ repos:
     hooks:
       - id: mypy
         args: []
-        additional_dependencies: ["mcp>=1.5", "rich-click>=1.8.6", "pytest>=8", "fastapi>=0.115"]
+        additional_dependencies:
+          - "mcp>=1.5"
+          - "rich-click>=1.8.6"
+          - "pytest>=8"
+          - "fastapi>=0.115"
+          - "types-requests>=2.32.0.20250306"
   - repo: local
     hooks:
       - id: pytest

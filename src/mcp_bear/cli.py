@@ -6,38 +6,52 @@
 #
 #  http://opensource.org/licenses/mit-license.php
 import logging
-import socket
+import random
+import string
+import subprocess
 import sys
+import tarfile
+from logging import Logger
+from pathlib import Path
 
+import requests
 import rich_click as click
+from requests import HTTPError
 
 from mcp_bear import server
 
 
-def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
-    """Check if a port is currently in use on the given host."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(1)
-        result = sock.connect_ex((host, port))
-        return result == 0
+def generate_file_suffix(length: int = 6) -> str:
+    chars = string.ascii_letters + string.digits
+    return "".join(random.choices(chars, k=length))
+
+
+def init_forwarder(logger: Logger) -> None:
+    forwarder_dir = Path.home().joinpath("Library", "Application Support", "xfwder")
+    forwarder = forwarder_dir.joinpath("xFwder.app")
+    if not forwarder.exists():
+        logger.info("xFwder.app doesn't exist, downloading it")
+        forwarder_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = forwarder_dir.joinpath("XFwder.tar.gz")
+
+        response = requests.get(
+            "https://github.com/jkawamoto/xfwder/releases/download/v0.1.0/XFwder.tar.gz", stream=True
+        )
+        response.raise_for_status()
+        with open(temp_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        with tarfile.open(temp_path, "r:gz") as tar:
+            tar.extractall(forwarder_dir)
+
+        logger.info("Initializing xFwder")
+        subprocess.call(["open", forwarder, "--args", "--init"])
 
 
 @click.command()
 @click.option("--token", envvar="BEAR_API_TOKEN", required=True, help="Bear API token")
-@click.option(
-    "--callback-host",
-    default="127.0.0.1",
-    help="hostname or IP address of the callback server",
-    show_default=True,
-)
-@click.option(
-    "--callback-port",
-    default=11599,
-    help="port number on which the callback server is listening",
-    show_default=True,
-)
 @click.version_option()
-def main(token: str, callback_host: str, callback_port: int) -> None:
+def main(token: str) -> None:
     """A MCP server for interacting with Bear note-taking software."""
     logging.basicConfig(
         level=logging.INFO,
@@ -48,17 +62,19 @@ def main(token: str, callback_host: str, callback_port: int) -> None:
     )
     logger = logging.getLogger(__name__)
 
-    for port in range(callback_port, callback_port + 10):
-        if is_port_in_use(port, callback_host):
-            logger.info(f"Port {port} is already in use. Trying another port.")
-        else:
-            callback_port = port
-            break
-    else:
-        logger.error("No available port found. Please try again.")
+    logger.info("Preparing XFwder")
+    try:
+        init_forwarder(logger)
+    except HTTPError as e:
+        logger.error("Failed to initialize XFwder", exc_info=e)
         sys.exit(1)
 
-    mcp = server(token, callback_host, callback_port)
+    logger.info("Preparing a UDS")
+    while True:
+        uds = Path("/tmp").joinpath(f"mcp-bear-{generate_file_suffix()}.sock")
+        if not uds.exists():
+            break
+    mcp = server(token, uds)
 
     logger.info("Starting MCP server (Press CTRL+D to quit)")
     mcp.run()

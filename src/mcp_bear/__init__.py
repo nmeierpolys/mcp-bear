@@ -15,6 +15,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from http import HTTPStatus
+from pathlib import Path
 from typing import cast, AsyncIterator, Final
 from urllib.parse import urlencode, quote, unquote_plus
 
@@ -43,7 +44,7 @@ class ErrorResponse(Exception):
 def register_callback(api: FastAPI, path: str) -> Queue[Future[QueryParams]]:
     queue = Queue[Future[QueryParams]]()
 
-    @api.get(f"/{path}/success", status_code=HTTPStatus.NO_CONTENT, include_in_schema=False)
+    @api.post(f"/{path}/success", status_code=HTTPStatus.NO_CONTENT, include_in_schema=False)
     def success(request: Request) -> None:
         try:
             future = queue.get_nowait()
@@ -51,7 +52,7 @@ def register_callback(api: FastAPI, path: str) -> Queue[Future[QueryParams]]:
         except QueueEmpty:
             pass
 
-    @api.get(f"/{path}/error", status_code=HTTPStatus.NO_CONTENT, include_in_schema=False)
+    @api.post(f"/{path}/error", status_code=HTTPStatus.NO_CONTENT, include_in_schema=False)
     def error(request: Request) -> None:
         try:
             future = queue.get_nowait()
@@ -82,7 +83,7 @@ class AppContext:
 
 
 @asynccontextmanager
-async def app_lifespan(_server: FastMCP, callback_host: str, callback_port: int) -> AsyncIterator[AppContext]:
+async def app_lifespan(_server: FastMCP, uds: Path) -> AsyncIterator[AppContext]:
     callback = FastAPI()
 
     log_config = deepcopy(LOGGING_CONFIG)
@@ -90,14 +91,13 @@ async def app_lifespan(_server: FastMCP, callback_host: str, callback_port: int)
     server = Server(
         Config(
             app=callback,
-            host=callback_host,
-            port=callback_port,
+            uds=str(uds),
             log_level="warning",
             log_config=log_config,
         )
     )
 
-    LOGGER.info(f"Starting callback server on {callback_host}:{callback_port}")
+    LOGGER.info(f"Starting callback server on {uds}")
     server_task = asyncio.create_task(server.serve())
     try:
         yield AppContext(
@@ -116,8 +116,8 @@ async def app_lifespan(_server: FastMCP, callback_host: str, callback_port: int)
         await server_task
 
 
-def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
-    mcp = FastMCP("Bear", lifespan=partial(app_lifespan, callback_host=callback_host, callback_port=callback_port))
+def server(token: str, uds: Path) -> FastMCP:
+    mcp = FastMCP("Bear", lifespan=partial(app_lifespan, uds=uds))
 
     @mcp.tool()
     async def open_note(
@@ -138,8 +138,8 @@ def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
             "selected": "no",
             "pin": "no",
             "edit": "no",
-            "x-success": f"http://{callback_host}:{callback_port}/open-note/success",
-            "x-error": f"http://{callback_host}:{callback_port}/open-note/error",
+            "x-success": f"xfwder://{uds.stem}/open-note/success",
+            "x-error": f"xfwder://{uds.stem}/open-note/error",
         }
         if id is not None:
             params["id"] = id
@@ -169,8 +169,8 @@ def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
             "new_window": "no",
             "float": "no",
             "show_window": "no",
-            "x-success": f"http://{callback_host}:{callback_port}/create/success",
-            "x-error": f"http://{callback_host}:{callback_port}/create/error",
+            "x-success": f"xfwder://{uds.stem}/create/success",
+            "x-error": f"xfwder://{uds.stem}/create/error",
         }
         if title is not None:
             params["title"] = title
@@ -197,8 +197,8 @@ def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
 
         params = {
             "token": token,
-            "x-success": f"http://{callback_host}:{callback_port}/tags/success",
-            "x-error": f"http://{callback_host}:{callback_port}/tags/error",
+            "x-success": f"xfwder://{uds.stem}/tags/success",
+            "x-error": f"xfwder://{uds.stem}/tags/error",
         }
 
         webbrowser.open(f"{BASE_URL}/tags?{urlencode(params, quote_via=quote)}")
@@ -220,8 +220,8 @@ def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
         params = {
             "name": name,
             "token": token,
-            "x-success": f"http://{callback_host}:{callback_port}/open-tag/success",
-            "x-error": f"http://{callback_host}:{callback_port}/open-tag/error",
+            "x-success": f"xfwder://{uds.stem}/open-tag/success",
+            "x-error": f"xfwder://{uds.stem}/open-tag/error",
         }
 
         webbrowser.open(f"{BASE_URL}/open-tag?{urlencode(params, quote_via=quote)}")
@@ -243,8 +243,8 @@ def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
         params = {
             "show_window": "no",
             "token": token,
-            "x-success": f"http://{callback_host}:{callback_port}/todo/success",
-            "x-error": f"http://{callback_host}:{callback_port}/todo/error",
+            "x-success": f"xfwder://{uds.stem}/todo/success",
+            "x-error": f"xfwder://{uds.stem}/todo/error",
         }
         if search is not None:
             params["search"] = search
@@ -268,8 +268,8 @@ def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
         params = {
             "show_window": "no",
             "token": token,
-            "x-success": f"http://{callback_host}:{callback_port}/today/success",
-            "x-error": f"http://{callback_host}:{callback_port}/today/error",
+            "x-success": f"xfwder://{uds.stem}/today/success",
+            "x-error": f"xfwder://{uds.stem}/today/error",
         }
         if search is not None:
             params["search"] = search
@@ -294,8 +294,8 @@ def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
         params = {
             "show_window": "no",
             "token": token,
-            "x-success": f"http://{callback_host}:{callback_port}/search/success",
-            "x-error": f"http://{callback_host}:{callback_port}/search/error",
+            "x-success": f"xfwder://{uds.stem}/search/success",
+            "x-error": f"xfwder://{uds.stem}/search/error",
         }
         if term is not None:
             params["term"] = term
@@ -324,8 +324,8 @@ def server(token: str, callback_host: str, callback_port: int) -> FastMCP:
 
         params = {
             "url": url,
-            "x-success": f"http://{callback_host}:{callback_port}/grab-url/success",
-            "x-error": f"http://{callback_host}:{callback_port}/grab-url/error",
+            "x-success": f"xfwder://{uds.stem}/grab-url/success",
+            "x-error": f"xfwder://{uds.stem}/grab-url/error",
         }
         if tags is not None:
             params["tags"] = ",".join(tags)
