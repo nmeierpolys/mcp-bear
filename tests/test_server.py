@@ -40,3 +40,4 @@ async def test_list_tools(mcp_client_session: ClientSession) -> None:
     assert "today" in tools
     assert "search" in tools
     assert "grab_url" in tools
+    assert "replace_note" in tools

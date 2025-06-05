@@ -74,6 +74,7 @@ def register_callback(api: FastAPI, path: str) -> Queue[Future[QueryParams]]:
 class AppContext:
     open_note_results: Queue[Future[QueryParams]]
     create_results: Queue[Future[QueryParams]]
+    add_text_results: Queue[Future[QueryParams]]
     tags_results: Queue[Future[QueryParams]]
     open_tag_results: Queue[Future[QueryParams]]
     todo_results: Queue[Future[QueryParams]]
@@ -103,6 +104,7 @@ async def app_lifespan(_server: FastMCP, uds: Path) -> AsyncIterator[AppContext]
         yield AppContext(
             open_note_results=register_callback(callback, "open-note"),
             create_results=register_callback(callback, "create"),
+            add_text_results=register_callback(callback, "add-text"),
             tags_results=register_callback(callback, "tags"),
             open_tag_results=register_callback(callback, "open-tag"),
             todo_results=register_callback(callback, "todo"),
@@ -185,6 +187,47 @@ def server(token: str, uds: Path) -> FastMCP:
         res = await future
 
         return res.get("identifier") or ""
+
+    @mcp.tool()
+    async def replace_note(
+        ctx: Context,
+        id: str | None = Field(description="note unique identifier", default=None),
+        title: str | None = Field(description="new title for the note", default=None),
+        text: str | None = Field(description="new text to replace note content", default=None),
+        tags: list[str] | None = Field(description="list of tags to add to the note", default=None),
+        timestamp: bool = Field(description="prepend the current date and time to the text", default=False),
+    ) -> str:
+        """Replace the content of an existing note identified by its id."""
+        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
+        future = Future[QueryParams]()
+        await app_ctx.add_text_results.put(future)
+
+        mode = "replace_all" if title is not None else "replace"
+
+        params = {
+            "mode": mode,
+            "open_note": "no",
+            "new_window": "no",
+            "show_window": "no",
+            "edit": "no",
+            "x-success": f"xfwder://{uds.stem}/add-text/success",
+            "x-error": f"xfwder://{uds.stem}/add-text/error",
+        }
+        if id is not None:
+            params["id"] = id
+        if text is not None:
+            params["text"] = text
+        if title is not None:
+            params["title"] = title
+        if tags is not None:
+            params["tags"] = ",".join(tags)
+        if timestamp:
+            params["timestamp"] = "yes"
+
+        webbrowser.open(f"{BASE_URL}/add-text?{urlencode(params, quote_via=quote)}")
+        res = await future
+
+        return unquote_plus(res.get("note") or "")
 
     @mcp.tool()
     async def tags(
