@@ -95,6 +95,7 @@ async def app_lifespan(_server: FastMCP, uds: Path) -> AsyncIterator[AppContext]
             uds=str(uds),
             log_level="warning",
             log_config=log_config,
+            h11_max_incomplete_event_size=1024 * 1024,  # 1MB
         )
     )
 
