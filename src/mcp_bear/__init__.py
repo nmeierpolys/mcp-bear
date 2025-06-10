@@ -180,7 +180,7 @@ def server(token: str, uds: Path) -> FastMCP:
         if text is not None:
             if title:
                 # remove the title from the note text to avoid being duplicated
-                text = text.removeprefix(title)
+                text = text.removeprefix("# " + title)
             params["text"] = text
         if tags is not None:
             params["tags"] = ",".join(tags)
