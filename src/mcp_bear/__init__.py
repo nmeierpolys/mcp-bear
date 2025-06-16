@@ -9,17 +9,17 @@ import asyncio
 import json
 import logging
 import webbrowser
-from asyncio import Queue, Future, QueueEmpty
+from asyncio import Future
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from http import HTTPStatus
 from pathlib import Path
-from typing import cast, AsyncIterator, Final
+from typing import cast, AsyncIterator, Final, Any
 from urllib.parse import urlencode, quote, unquote_plus
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from mcp.server import FastMCP
 from mcp.server.fastmcp import Context
 from pydantic import Field
@@ -41,51 +41,35 @@ class ErrorResponse(Exception):
         return self.errorMessage
 
 
-def register_callback(api: FastAPI, path: str) -> Queue[Future[QueryParams]]:
-    queue = Queue[Future[QueryParams]]()
-
-    @api.post(f"/{path}/success", status_code=HTTPStatus.NO_CONTENT, include_in_schema=False)
-    def success(request: Request) -> None:
-        try:
-            future = queue.get_nowait()
-            future.set_result(request.query_params)
-        except QueueEmpty:
-            pass
-
-    @api.post(f"/{path}/error", status_code=HTTPStatus.NO_CONTENT, include_in_schema=False)
-    def error(request: Request) -> None:
-        try:
-            future = queue.get_nowait()
-
-            q = request.query_params
-            future.set_exception(
-                ErrorResponse(
-                    errorCode=int(q.get("error-Code") or "0"),
-                    errorMessage=q.get("errorMessage") or "",
-                )
-            )
-        except QueueEmpty:
-            pass
-
-    return queue
-
-
 @dataclass
 class AppContext:
-    open_note_results: Queue[Future[QueryParams]]
-    create_results: Queue[Future[QueryParams]]
-    add_text_results: Queue[Future[QueryParams]]
-    tags_results: Queue[Future[QueryParams]]
-    open_tag_results: Queue[Future[QueryParams]]
-    todo_results: Queue[Future[QueryParams]]
-    today_results: Queue[Future[QueryParams]]
-    search_results: Queue[Future[QueryParams]]
-    grab_url_results: Queue[Future[QueryParams]]
+    futures: dict[str, Future[QueryParams]]
 
 
 @asynccontextmanager
 async def app_lifespan(_server: FastMCP, uds: Path) -> AsyncIterator[AppContext]:
     callback = FastAPI()
+    futures: dict[str, Future[QueryParams]] = {}
+
+    @callback.post("/{req_id}/success", status_code=HTTPStatus.NO_CONTENT, include_in_schema=False)
+    def success(req_id: str, req: Request) -> None:
+        if req_id not in futures:
+            raise HTTPException(status_code=404, detail="Request not found")
+
+        futures[req_id].set_result(req.query_params)
+
+    @callback.post("/{req_id}/error", status_code=HTTPStatus.NO_CONTENT, include_in_schema=False)
+    def error(req_id: str, req: Request) -> None:
+        if req_id not in futures:
+            raise HTTPException(status_code=404, detail="Request not found")
+
+        q = req.query_params
+        futures[req_id].set_exception(
+            ErrorResponse(
+                errorCode=int(q.get("error-Code") or "0"),
+                errorMessage=q.get("errorMessage") or "",
+            )
+        )
 
     log_config = deepcopy(LOGGING_CONFIG)
     log_config["handlers"]["access"]["stream"] = "ext://sys.stderr"
@@ -102,17 +86,7 @@ async def app_lifespan(_server: FastMCP, uds: Path) -> AsyncIterator[AppContext]
     LOGGER.info(f"Starting callback server on {uds}")
     server_task = asyncio.create_task(server.serve())
     try:
-        yield AppContext(
-            open_note_results=register_callback(callback, "open-note"),
-            create_results=register_callback(callback, "create"),
-            add_text_results=register_callback(callback, "add-text"),
-            tags_results=register_callback(callback, "tags"),
-            open_tag_results=register_callback(callback, "open-tag"),
-            todo_results=register_callback(callback, "todo"),
-            today_results=register_callback(callback, "today"),
-            search_results=register_callback(callback, "search"),
-            grab_url_results=register_callback(callback, "grab-url"),
-        )
+        yield AppContext(futures=futures)
     finally:
         LOGGER.info("Stopping callback server")
         server.should_exit = True
@@ -124,15 +98,12 @@ def server(token: str, uds: Path) -> FastMCP:
 
     @mcp.tool()
     async def open_note(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
         id: str | None = Field(description="note unique identifier", default=None),
         title: str | None = Field(description="note title", default=None),
     ) -> str:
         """Open a note identified by its title or id and return its content."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.open_note_results.put(future)
-
+        req_id = ctx.request_id
         params = {
             "new_window": "no",
             "float": "no",
@@ -141,39 +112,41 @@ def server(token: str, uds: Path) -> FastMCP:
             "selected": "no",
             "pin": "no",
             "edit": "no",
-            "x-success": f"xfwder://{uds.stem}/open-note/success",
-            "x-error": f"xfwder://{uds.stem}/open-note/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
         if id is not None:
             params["id"] = id
         if title is not None:
             params["title"] = title
 
-        webbrowser.open(f"{BASE_URL}/open-note?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/open-note?{urlencode(params, quote_via=quote)}")
+            res = await future
+            return unquote_plus(res.get("note") or "")
 
-        return unquote_plus(res.get("note") or "")
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
     async def create(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
         title: str | None = Field(description="note title", default=None),
         text: str | None = Field(description="note body", default=None),
         tags: list[str] | None = Field(description="list of tags", default=None),
         timestamp: bool = Field(description="prepend the current date and time to the text", default=False),
     ) -> str:
         """Create a new note and return its unique identifier. Empty notes are not allowed."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.create_results.put(future)
-
+        req_id = ctx.request_id
         params = {
             "open_note": "no",
             "new_window": "no",
             "float": "no",
             "show_window": "no",
-            "x-success": f"xfwder://{uds.stem}/create/success",
-            "x-error": f"xfwder://{uds.stem}/create/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
         if title is not None:
             params["title"] = title
@@ -187,14 +160,19 @@ def server(token: str, uds: Path) -> FastMCP:
         if timestamp:
             params["timestamp"] = "yes"
 
-        webbrowser.open(f"{BASE_URL}/create?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/create?{urlencode(params, quote_via=quote)}")
+            res = await future
+            return res.get("identifier") or ""
 
-        return res.get("identifier") or ""
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
     async def replace_note(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
         id: str | None = Field(description="note unique identifier", default=None),
         title: str | None = Field(description="new title for the note", default=None),
         text: str | None = Field(description="new text to replace note content", default=None),
@@ -202,20 +180,16 @@ def server(token: str, uds: Path) -> FastMCP:
         timestamp: bool = Field(description="prepend the current date and time to the text", default=False),
     ) -> str:
         """Replace the content of an existing note identified by its id."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.add_text_results.put(future)
-
+        req_id = ctx.request_id
         mode = "replace_all" if title is not None else "replace"
-
         params = {
             "mode": mode,
             "open_note": "no",
             "new_window": "no",
             "show_window": "no",
             "edit": "no",
-            "x-success": f"xfwder://{uds.stem}/add-text/success",
-            "x-error": f"xfwder://{uds.stem}/add-text/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
         if id is not None:
             params["id"] = id
@@ -228,136 +202,160 @@ def server(token: str, uds: Path) -> FastMCP:
         if timestamp:
             params["timestamp"] = "yes"
 
-        webbrowser.open(f"{BASE_URL}/add-text?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/add-text?{urlencode(params, quote_via=quote)}")
+            res = await future
+            return unquote_plus(res.get("note") or "")
 
-        return unquote_plus(res.get("note") or "")
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
     async def tags(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
     ) -> list[str]:
         """Return all the tags currently displayed in Bear’s sidebar."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.tags_results.put(future)
-
+        req_id = ctx.request_id
         params = {
             "token": token,
-            "x-success": f"xfwder://{uds.stem}/tags/success",
-            "x-error": f"xfwder://{uds.stem}/tags/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
 
-        webbrowser.open(f"{BASE_URL}/tags?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/tags?{urlencode(params, quote_via=quote)}")
+            res = await future
 
-        notes = cast(list[dict], json.loads(res.get("tags") or "[]"))
-        return [note["name"] for note in notes if "name" in note]
+            raw_tags = res.get("tags")
+            if raw_tags is None:
+                return []
+
+            notes = cast(list[dict[str, str]], json.loads(raw_tags))
+            return [note["name"] for note in notes if "name" in note]
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
     async def open_tag(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
         name: str = Field(description="tag name or a list of tags divided by comma"),
     ) -> list[str]:
         """Show all the notes which have a selected tag in bear."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.open_tag_results.put(future)
-
+        req_id = ctx.request_id
         params = {
             "name": name,
             "token": token,
-            "x-success": f"xfwder://{uds.stem}/open-tag/success",
-            "x-error": f"xfwder://{uds.stem}/open-tag/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
 
-        webbrowser.open(f"{BASE_URL}/open-tag?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/open-tag?{urlencode(params, quote_via=quote)}")
+            res = await future
 
-        notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-        return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
+            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
     async def todo(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
         search: str | None = Field(description="string to search", default=None),
     ) -> list[str]:
         """Select the Todo sidebar item."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.todo_results.put(future)
-
+        req_id = ctx.request_id
         params = {
             "show_window": "no",
             "token": token,
-            "x-success": f"xfwder://{uds.stem}/todo/success",
-            "x-error": f"xfwder://{uds.stem}/todo/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
         if search is not None:
             params["search"] = search
 
-        webbrowser.open(f"{BASE_URL}/todo?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/todo?{urlencode(params, quote_via=quote)}")
+            res = await future
 
-        notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-        return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
+            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
     async def today(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
         search: str | None = Field(description="string to search", default=None),
     ) -> list[str]:
         """Select the Today sidebar item."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.today_results.put(future)
-
+        req_id = ctx.request_id
         params = {
             "show_window": "no",
             "token": token,
-            "x-success": f"xfwder://{uds.stem}/today/success",
-            "x-error": f"xfwder://{uds.stem}/today/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
         if search is not None:
             params["search"] = search
 
-        webbrowser.open(f"{BASE_URL}/today?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/today?{urlencode(params, quote_via=quote)}")
+            res = await future
 
-        notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-        return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
+            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
     async def search(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
         term: str | None = Field(description="string to search", default=None),
         tag: str | None = Field(description="tag to search into", default=None),
     ) -> list[str]:
         """Show search results in Bear for all notes or for a specific tag."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.search_results.put(future)
-
+        req_id = ctx.request_id
         params = {
             "show_window": "no",
             "token": token,
-            "x-success": f"xfwder://{uds.stem}/search/success",
-            "x-error": f"xfwder://{uds.stem}/search/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
         if term is not None:
             params["term"] = term
         if tag is not None:
             params["tag"] = tag
 
-        webbrowser.open(f"{BASE_URL}/search?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/search?{urlencode(params, quote_via=quote)}")
+            res = await future
 
-        notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-        return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
+            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
     async def grab_url(
-        ctx: Context,
+        ctx: Context[Any, AppContext],
         url: str = Field(description="url to grab"),
         tags: list[str] | None = Field(
             description="list of tags. If tags are specified in the Bear’s web content preferences, this parameter is ignored.",
@@ -365,22 +363,25 @@ def server(token: str, uds: Path) -> FastMCP:
         ),
     ) -> str:
         """Create a new note with the content of a web page and return its unique identifier."""
-        app_ctx: AppContext = ctx.request_context.lifespan_context  # type: ignore
-        future = Future[QueryParams]()
-        await app_ctx.grab_url_results.put(future)
-
+        req_id = ctx.request_id
         params = {
             "url": url,
-            "x-success": f"xfwder://{uds.stem}/grab-url/success",
-            "x-error": f"xfwder://{uds.stem}/grab-url/error",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
         }
         if tags is not None:
             params["tags"] = ",".join(tags)
 
-        webbrowser.open(f"{BASE_URL}/grab-url?{urlencode(params, quote_via=quote)}")
-        res = await future
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/grab-url?{urlencode(params, quote_via=quote)}")
+            res = await future
 
-        return res.get("identifier") or ""
+            return res.get("identifier") or ""
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
 
     return mcp
 
