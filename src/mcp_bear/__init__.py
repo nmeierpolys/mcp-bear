@@ -259,9 +259,33 @@ def server(token: str, uds: Path) -> FastMCP:
         try:
             webbrowser.open(f"{BASE_URL}/open-tag?{urlencode(params, quote_via=quote)}")
             res = await future
+            return format_notes(res.get("notes"))
 
-            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
+
+    @mcp.tool()
+    async def untagged(
+        ctx: Context[Any, AppContext],
+        search: str | None = Field(description="string to search", default=None),
+    ) -> list[str]:
+        """Select the Untagged sidebar item."""
+        req_id = ctx.request_id
+        params = {
+            "show_window": "no",
+            "token": token,
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
+        }
+        if search is not None:
+            params["search"] = search
+
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/untagged?{urlencode(params, quote_via=quote)}")
+            res = await future
+            return format_notes(res.get("notes"))
 
         finally:
             del ctx.request_context.lifespan_context.futures[req_id]
@@ -287,9 +311,7 @@ def server(token: str, uds: Path) -> FastMCP:
         try:
             webbrowser.open(f"{BASE_URL}/todo?{urlencode(params, quote_via=quote)}")
             res = await future
-
-            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            return format_notes(res.get("notes"))
 
         finally:
             del ctx.request_context.lifespan_context.futures[req_id]
@@ -315,9 +337,7 @@ def server(token: str, uds: Path) -> FastMCP:
         try:
             webbrowser.open(f"{BASE_URL}/today?{urlencode(params, quote_via=quote)}")
             res = await future
-
-            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            return format_notes(res.get("notes"))
 
         finally:
             del ctx.request_context.lifespan_context.futures[req_id]
@@ -346,9 +366,7 @@ def server(token: str, uds: Path) -> FastMCP:
         try:
             webbrowser.open(f"{BASE_URL}/search?{urlencode(params, quote_via=quote)}")
             res = await future
-
-            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            return format_notes(res.get("notes"))
 
         finally:
             del ctx.request_context.lifespan_context.futures[req_id]
@@ -384,6 +402,14 @@ def server(token: str, uds: Path) -> FastMCP:
             del ctx.request_context.lifespan_context.futures[req_id]
 
     return mcp
+
+
+def format_notes(raw: str | None) -> list[str]:
+    if raw is None:
+        return []
+
+    notes = cast(list[dict], json.loads(raw))
+    return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
 
 
 __all__: Final = ["server"]

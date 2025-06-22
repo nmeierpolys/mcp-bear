@@ -86,7 +86,7 @@ Refer to Bear's [X-callback-url Scheme documentation](https://bear.app/faq/x-cal
 - [ ] /delete-tag
 - [ ] /trash
 - [ ] /archive
-- [ ] /untagged
+- [x] /untagged
 - [x] /todo
 - [x] /today
 - [ ] /locked
