@@ -351,6 +351,42 @@ async def test_open_tag_failed(
 
 
 @pytest.mark.anyio
+async def test_rename_tag(
+    temp_socket: Path,
+    mcp_server: Tuple[FastMCP, Context],
+    mock_webbrowser: MagicMock,
+) -> None:
+    s, ctx = mcp_server
+    mock_webbrowser.stubbed_queries = {}
+
+    await s._tool_manager.call_tool("rename_tag", arguments={"name": "old name", "new_name": "new name"}, context=ctx)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+    req_params = {
+        "name": "old name",
+        "new_name": "new name",
+        "show_window": "no",
+        "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
+        "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
+    }
+    mock_webbrowser.assert_called_once_with(f"{BASE_URL}/rename-tag?{urlencode(req_params, quote_via=quote)}")
+
+
+@pytest.mark.anyio
+async def test_rename_tag_failed(
+    mcp_server: Tuple[FastMCP, Context[Any, AppContext]], mock_webbrowser_error: MagicMock
+) -> None:
+    s, ctx = mcp_server
+    with pytest.raises(ToolError) as excinfo:
+        await s._tool_manager.call_tool(
+            "rename_tag", arguments={"name": "old name", "new_name": "new name"}, context=ctx
+        )
+
+    assert "test error message" in str(excinfo.value)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("arguments", [{}, {"search": "keyword"}])
 async def test_untagged(
     temp_socket: Path,
