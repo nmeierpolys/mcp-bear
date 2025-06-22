@@ -83,7 +83,7 @@ Refer to Bear's [X-callback-url Scheme documentation](https://bear.app/faq/x-cal
 - [x] /tags
 - [x] /open-tag
 - [x] /rename-tag
-- [ ] /delete-tag
+- [x] /delete-tag
 - [ ] /trash
 - [ ] /archive
 - [x] /untagged

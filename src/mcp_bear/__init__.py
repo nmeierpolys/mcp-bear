@@ -294,6 +294,33 @@ def server(token: str, uds: Path) -> FastMCP:
             del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
+    async def delete_tag(
+        ctx: Context[Any, AppContext],
+        name: str = Field(description="tag name"),
+    ) -> None:
+        """Delete an existing tag.
+
+         This call can’t be performed if the app is a locked state.
+        If the tag contains any locked note this call will not be performed.
+        """
+        req_id = ctx.request_id
+        params = {
+            "name": name,
+            "show_window": "no",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
+        }
+
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/delete-tag?{urlencode(params, quote_via=quote)}")
+            await future
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
+
+    @mcp.tool()
     async def untagged(
         ctx: Context[Any, AppContext],
         search: str | None = Field(description="string to search", default=None),
