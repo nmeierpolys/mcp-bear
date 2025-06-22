@@ -89,7 +89,7 @@ Refer to Bear's [X-callback-url Scheme documentation](https://bear.app/faq/x-cal
 - [x] /untagged
 - [x] /todo
 - [x] /today
-- [ ] /locked
+- [x] /locked
 - [x] /search
 - [x] /grab-url
 
