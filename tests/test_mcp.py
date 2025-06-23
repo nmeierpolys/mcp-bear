@@ -31,8 +31,14 @@ async def test_list_tools(mcp_client_session: ClientSession) -> None:
     assert "create" in tools
     assert "tags" in tools
     assert "open_tag" in tools
+    assert "rename_tag" in tools
+    assert "delete_tag" in tools
+    assert "trash" in tools
+    assert "archive" in tools
+    assert "untagged" in tools
     assert "todo" in tools
     assert "today" in tools
+    assert "locked" in tools
     assert "search" in tools
     assert "grab_url" in tools
     assert "replace_note" in tools

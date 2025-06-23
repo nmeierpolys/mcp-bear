@@ -259,12 +259,142 @@ def server(token: str, uds: Path) -> FastMCP:
         try:
             webbrowser.open(f"{BASE_URL}/open-tag?{urlencode(params, quote_via=quote)}")
             res = await future
-
-            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            return format_notes(res.get("notes"))
 
         finally:
             del ctx.request_context.lifespan_context.futures[req_id]
+
+    @mcp.tool()
+    async def rename_tag(
+        ctx: Context[Any, AppContext],
+        name: str = Field(description="tag name"),
+        new_name: str = Field(description="new tag name"),
+    ) -> None:
+        """Rename an existing tag.
+
+        This call can’t be performed if the app is a locked state.
+        If the tag contains any locked note this call will not be performed.
+        """
+        req_id = ctx.request_id
+        params = {
+            "name": name,
+            "new_name": new_name,
+            "show_window": "no",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
+        }
+
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/rename-tag?{urlencode(params, quote_via=quote)}")
+            await future
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
+
+    @mcp.tool()
+    async def delete_tag(
+        ctx: Context[Any, AppContext],
+        name: str = Field(description="tag name"),
+    ) -> None:
+        """Delete an existing tag.
+
+         This call can’t be performed if the app is a locked state.
+        If the tag contains any locked note this call will not be performed.
+        """
+        req_id = ctx.request_id
+        params = {
+            "name": name,
+            "show_window": "no",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
+        }
+
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/delete-tag?{urlencode(params, quote_via=quote)}")
+            await future
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
+
+    async def move_note(ctx: AppContext, req_id: str, id: str | None, search: str | None, dest: str) -> None:
+        """Move a note identified by its title or id to the given destination."""
+        params = {
+            "show_window": "no",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
+        }
+        if id is not None:
+            params["id"] = id
+        if search is not None:
+            params["search"] = search
+
+        future = Future[QueryParams]()
+        ctx.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/{dest}?{urlencode(params, quote_via=quote)}")
+            await future
+
+        finally:
+            del ctx.futures[req_id]
+
+    @mcp.tool()
+    async def trash(
+        ctx: Context[Any, AppContext],
+        id: str | None = Field(description="note unique identifier", default=None),
+        search: str | None = Field(description="string to search.", default=None),
+    ) -> None:
+        """Move a note to bear trash and select the Trash sidebar item.
+
+        This call can’t be performed if the app is a locked state. Encrypted notes can’t be used with this call.
+        The search term is ignored if an id is provided.
+        """
+        await move_note(ctx.request_context.lifespan_context, ctx.request_id, id, search, "trash")
+
+    @mcp.tool()
+    async def archive(
+        ctx: Context[Any, AppContext],
+        id: str | None = Field(description="note unique identifier", default=None),
+        search: str | None = Field(description="string to search.", default=None),
+    ) -> None:
+        """Move a note to bear archive and select the Archive sidebar item.
+
+        This call can’t be performed if the app is a locked state. Encrypted notes can’t be accessed with this call.
+        The search term is ignored if an id is provided.
+        """
+        await move_note(ctx.request_context.lifespan_context, ctx.request_id, id, search, "archive")
+
+    async def sidebar_items(ctx: AppContext, req_id: str, kind: str, search: str | None) -> list[str]:
+        """List notes in the specified sidebar."""
+        params = {
+            "show_window": "no",
+            "token": token,
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
+        }
+        if search is not None:
+            params["search"] = search
+
+        future = Future[QueryParams]()
+        ctx.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/{kind}?{urlencode(params, quote_via=quote)}")
+            res = await future
+            return format_notes(res.get("notes"))
+
+        finally:
+            del ctx.futures[req_id]
+
+    @mcp.tool()
+    async def untagged(
+        ctx: Context[Any, AppContext],
+        search: str | None = Field(description="string to search", default=None),
+    ) -> list[str]:
+        """Select the Untagged sidebar item."""
+        return await sidebar_items(ctx.request_context.lifespan_context, ctx.request_id, "untagged", search)
 
     @mcp.tool()
     async def todo(
@@ -272,27 +402,7 @@ def server(token: str, uds: Path) -> FastMCP:
         search: str | None = Field(description="string to search", default=None),
     ) -> list[str]:
         """Select the Todo sidebar item."""
-        req_id = ctx.request_id
-        params = {
-            "show_window": "no",
-            "token": token,
-            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
-            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
-        }
-        if search is not None:
-            params["search"] = search
-
-        future = Future[QueryParams]()
-        ctx.request_context.lifespan_context.futures[req_id] = future
-        try:
-            webbrowser.open(f"{BASE_URL}/todo?{urlencode(params, quote_via=quote)}")
-            res = await future
-
-            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
-
-        finally:
-            del ctx.request_context.lifespan_context.futures[req_id]
+        return await sidebar_items(ctx.request_context.lifespan_context, ctx.request_id, "todo", search)
 
     @mcp.tool()
     async def today(
@@ -300,27 +410,15 @@ def server(token: str, uds: Path) -> FastMCP:
         search: str | None = Field(description="string to search", default=None),
     ) -> list[str]:
         """Select the Today sidebar item."""
-        req_id = ctx.request_id
-        params = {
-            "show_window": "no",
-            "token": token,
-            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
-            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
-        }
-        if search is not None:
-            params["search"] = search
+        return await sidebar_items(ctx.request_context.lifespan_context, ctx.request_id, "today", search)
 
-        future = Future[QueryParams]()
-        ctx.request_context.lifespan_context.futures[req_id] = future
-        try:
-            webbrowser.open(f"{BASE_URL}/today?{urlencode(params, quote_via=quote)}")
-            res = await future
-
-            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
-
-        finally:
-            del ctx.request_context.lifespan_context.futures[req_id]
+    @mcp.tool()
+    async def locked(
+        ctx: Context[Any, AppContext],
+        search: str | None = Field(description="string to search", default=None),
+    ) -> list[str]:
+        """Select the Locked sidebar item."""
+        return await sidebar_items(ctx.request_context.lifespan_context, ctx.request_id, "locked", search)
 
     @mcp.tool()
     async def search(
@@ -346,9 +444,7 @@ def server(token: str, uds: Path) -> FastMCP:
         try:
             webbrowser.open(f"{BASE_URL}/search?{urlencode(params, quote_via=quote)}")
             res = await future
-
-            notes = cast(list[dict], json.loads(res.get("notes") or "[]"))
-            return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
+            return format_notes(res.get("notes"))
 
         finally:
             del ctx.request_context.lifespan_context.futures[req_id]
@@ -384,6 +480,14 @@ def server(token: str, uds: Path) -> FastMCP:
             del ctx.request_context.lifespan_context.futures[req_id]
 
     return mcp
+
+
+def format_notes(raw: str | None) -> list[str]:
+    if raw is None:
+        return []
+
+    notes = cast(list[dict], json.loads(raw))
+    return [f"{note.get('title')} (ID: {note.get('identifier')})" for note in notes]
 
 
 __all__: Final = ["server"]

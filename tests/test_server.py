@@ -351,6 +351,194 @@ async def test_open_tag_failed(
 
 
 @pytest.mark.anyio
+async def test_rename_tag(
+    temp_socket: Path,
+    mcp_server: Tuple[FastMCP, Context],
+    mock_webbrowser: MagicMock,
+) -> None:
+    s, ctx = mcp_server
+    mock_webbrowser.stubbed_queries = {}
+
+    await s._tool_manager.call_tool("rename_tag", arguments={"name": "old name", "new_name": "new name"}, context=ctx)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+    req_params = {
+        "name": "old name",
+        "new_name": "new name",
+        "show_window": "no",
+        "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
+        "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
+    }
+    mock_webbrowser.assert_called_once_with(f"{BASE_URL}/rename-tag?{urlencode(req_params, quote_via=quote)}")
+
+
+@pytest.mark.anyio
+async def test_rename_tag_failed(
+    mcp_server: Tuple[FastMCP, Context[Any, AppContext]], mock_webbrowser_error: MagicMock
+) -> None:
+    s, ctx = mcp_server
+    with pytest.raises(ToolError) as excinfo:
+        await s._tool_manager.call_tool(
+            "rename_tag", arguments={"name": "old name", "new_name": "new name"}, context=ctx
+        )
+
+    assert "test error message" in str(excinfo.value)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+
+@pytest.mark.anyio
+async def test_delete_tag(
+    temp_socket: Path,
+    mcp_server: Tuple[FastMCP, Context],
+    mock_webbrowser: MagicMock,
+) -> None:
+    s, ctx = mcp_server
+    mock_webbrowser.stubbed_queries = {}
+
+    await s._tool_manager.call_tool("delete_tag", arguments={"name": "tag name"}, context=ctx)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+    req_params = {
+        "name": "tag name",
+        "show_window": "no",
+        "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
+        "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
+    }
+    mock_webbrowser.assert_called_once_with(f"{BASE_URL}/delete-tag?{urlencode(req_params, quote_via=quote)}")
+
+
+@pytest.mark.anyio
+async def test_delete_tag_failed(
+    mcp_server: Tuple[FastMCP, Context[Any, AppContext]], mock_webbrowser_error: MagicMock
+) -> None:
+    s, ctx = mcp_server
+    with pytest.raises(ToolError) as excinfo:
+        await s._tool_manager.call_tool("delete_tag", arguments={"name": "tag name"}, context=ctx)
+
+    assert "test error message" in str(excinfo.value)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "arguments", [{"id": "1234567890"}, {"search": "test note"}, {"id": "1234567890", "search": "test note"}]
+)
+async def test_trash(
+    temp_socket: Path,
+    mcp_server: Tuple[FastMCP, Context],
+    mock_webbrowser: MagicMock,
+    arguments: dict,
+) -> None:
+    s, ctx = mcp_server
+    mock_webbrowser.stubbed_queries = {}
+
+    await s._tool_manager.call_tool("trash", arguments=arguments, context=ctx)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+    req_params = {
+        "show_window": "no",
+        "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
+        "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
+    }
+    req_params.update(arguments)
+    mock_webbrowser.assert_called_once_with(f"{BASE_URL}/trash?{urlencode(req_params, quote_via=quote)}")
+
+
+@pytest.mark.anyio
+async def test_trash_failed(
+    mcp_server: Tuple[FastMCP, Context[Any, AppContext]], mock_webbrowser_error: MagicMock
+) -> None:
+    s, ctx = mcp_server
+    with pytest.raises(ToolError) as excinfo:
+        await s._tool_manager.call_tool("trash", arguments={"search": "tag name"}, context=ctx)
+
+    assert "test error message" in str(excinfo.value)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "arguments", [{"id": "1234567890"}, {"search": "test note"}, {"id": "1234567890", "search": "test note"}]
+)
+async def test_archive(
+    temp_socket: Path,
+    mcp_server: Tuple[FastMCP, Context],
+    mock_webbrowser: MagicMock,
+    arguments: dict,
+) -> None:
+    s, ctx = mcp_server
+    mock_webbrowser.stubbed_queries = {}
+
+    await s._tool_manager.call_tool("archive", arguments=arguments, context=ctx)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+    req_params = {
+        "show_window": "no",
+        "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
+        "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
+    }
+    req_params.update(arguments)
+    mock_webbrowser.assert_called_once_with(f"{BASE_URL}/archive?{urlencode(req_params, quote_via=quote)}")
+
+
+@pytest.mark.anyio
+async def test_archive_failed(
+    mcp_server: Tuple[FastMCP, Context[Any, AppContext]], mock_webbrowser_error: MagicMock
+) -> None:
+    s, ctx = mcp_server
+    with pytest.raises(ToolError) as excinfo:
+        await s._tool_manager.call_tool("archive", arguments={"search": "tag name"}, context=ctx)
+
+    assert "test error message" in str(excinfo.value)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("arguments", [{}, {"search": "keyword"}])
+async def test_untagged(
+    temp_socket: Path,
+    mcp_server: Tuple[FastMCP, Context],
+    mock_webbrowser: MagicMock,
+    arguments: dict,
+) -> None:
+    s, ctx = mcp_server
+
+    mock_webbrowser.stubbed_queries = {
+        "notes": json.dumps(
+            [
+                {"title": "note a", "identifier": "1"},
+                {"title": "note b", "identifier": "2"},
+            ]
+        )
+    }
+
+    res = await s._tool_manager.call_tool("untagged", arguments=arguments, context=ctx)
+    assert res == ["note a (ID: 1)", "note b (ID: 2)"]
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+    req_params = {
+        "show_window": "no",
+        "token": BEAR_TOKEN,
+        "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
+        "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
+    }
+    req_params.update(arguments)
+    mock_webbrowser.assert_called_once_with(f"{BASE_URL}/untagged?{urlencode(req_params, quote_via=quote)}")
+
+
+@pytest.mark.anyio
+async def test_untagged_failed(
+    mcp_server: Tuple[FastMCP, Context[Any, AppContext]], mock_webbrowser_error: MagicMock
+) -> None:
+    s, ctx = mcp_server
+    with pytest.raises(ToolError) as excinfo:
+        await s._tool_manager.call_tool("untagged", arguments={}, context=ctx)
+
+    assert "test error message" in str(excinfo.value)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("arguments", [{}, {"search": "keyword"}])
 async def test_todo(
     temp_socket: Path,
@@ -435,6 +623,51 @@ async def test_today_failed(
     s, ctx = mcp_server
     with pytest.raises(ToolError) as excinfo:
         await s._tool_manager.call_tool("today", arguments={}, context=ctx)
+
+    assert "test error message" in str(excinfo.value)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("arguments", [{}, {"search": "keyword"}])
+async def test_locked(
+    temp_socket: Path,
+    mcp_server: Tuple[FastMCP, Context],
+    mock_webbrowser: MagicMock,
+    arguments: dict,
+) -> None:
+    s, ctx = mcp_server
+
+    mock_webbrowser.stubbed_queries = {
+        "notes": json.dumps(
+            [
+                {"title": "note a", "identifier": "1"},
+                {"title": "note b", "identifier": "2"},
+            ]
+        )
+    }
+
+    res = await s._tool_manager.call_tool("locked", arguments=arguments, context=ctx)
+    assert res == ["note a (ID: 1)", "note b (ID: 2)"]
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+    req_params = {
+        "show_window": "no",
+        "token": BEAR_TOKEN,
+        "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
+        "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
+    }
+    req_params.update(arguments)
+    mock_webbrowser.assert_called_once_with(f"{BASE_URL}/locked?{urlencode(req_params, quote_via=quote)}")
+
+
+@pytest.mark.anyio
+async def test_locked_failed(
+    mcp_server: Tuple[FastMCP, Context[Any, AppContext]], mock_webbrowser_error: MagicMock
+) -> None:
+    s, ctx = mcp_server
+    with pytest.raises(ToolError) as excinfo:
+        await s._tool_manager.call_tool("locked", arguments={}, context=ctx)
 
     assert "test error message" in str(excinfo.value)
     assert len(ctx.request_context.lifespan_context.futures) == 0
