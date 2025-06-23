@@ -420,6 +420,43 @@ async def test_delete_tag_failed(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "arguments", [{"id": "1234567890"}, {"search": "test note"}, {"id": "1234567890", "search": "test note"}]
+)
+async def test_trash(
+    temp_socket: Path,
+    mcp_server: Tuple[FastMCP, Context],
+    mock_webbrowser: MagicMock,
+    arguments: dict,
+) -> None:
+    s, ctx = mcp_server
+    mock_webbrowser.stubbed_queries = {}
+
+    await s._tool_manager.call_tool("trash", arguments=arguments, context=ctx)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+    req_params = {
+        "show_window": "no",
+        "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
+        "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
+    }
+    req_params.update(arguments)
+    mock_webbrowser.assert_called_once_with(f"{BASE_URL}/trash?{urlencode(req_params, quote_via=quote)}")
+
+
+@pytest.mark.anyio
+async def test_trash_failed(
+    mcp_server: Tuple[FastMCP, Context[Any, AppContext]], mock_webbrowser_error: MagicMock
+) -> None:
+    s, ctx = mcp_server
+    with pytest.raises(ToolError) as excinfo:
+        await s._tool_manager.call_tool("trash", arguments={"search": "tag name"}, context=ctx)
+
+    assert "test error message" in str(excinfo.value)
+    assert len(ctx.request_context.lifespan_context.futures) == 0
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("arguments", [{}, {"search": "keyword"}])
 async def test_untagged(
     temp_socket: Path,

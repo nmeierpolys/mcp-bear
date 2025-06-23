@@ -321,6 +321,37 @@ def server(token: str, uds: Path) -> FastMCP:
             del ctx.request_context.lifespan_context.futures[req_id]
 
     @mcp.tool()
+    async def trash(
+        ctx: Context[Any, AppContext],
+        id: str | None = Field(description="note unique identifier", default=None),
+        search: str | None = Field(description="string to search.", default=None),
+    ) -> None:
+        """Move a note to bear trash and select the Trash sidebar item.
+
+        This call can’t be performed if the app is a locked state. Encrypted notes can’t be used with this call.
+        The search term is ignored if an id is provided.
+        """
+        req_id = ctx.request_id
+        params = {
+            "show_window": "no",
+            "x-success": f"xfwder://{uds.stem}/{req_id}/success",
+            "x-error": f"xfwder://{uds.stem}/{req_id}/error",
+        }
+        if id is not None:
+            params["id"] = id
+        if search is not None:
+            params["search"] = search
+
+        future = Future[QueryParams]()
+        ctx.request_context.lifespan_context.futures[req_id] = future
+        try:
+            webbrowser.open(f"{BASE_URL}/trash?{urlencode(params, quote_via=quote)}")
+            await future
+
+        finally:
+            del ctx.request_context.lifespan_context.futures[req_id]
+
+    @mcp.tool()
     async def untagged(
         ctx: Context[Any, AppContext],
         search: str | None = Field(description="string to search", default=None),
