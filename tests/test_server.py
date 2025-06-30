@@ -120,7 +120,6 @@ async def test_open_note(
         "show_window": "no",
         "open_note": "no",
         "selected": "no",
-        "pin": "no",
         "edit": "no",
         "x-success": f"xfwder://{temp_socket.stem}/{ctx.request_id}/success",
         "x-error": f"xfwder://{temp_socket.stem}/{ctx.request_id}/error",
