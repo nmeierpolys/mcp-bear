@@ -110,7 +110,7 @@ def server(token: str, uds: Path) -> FastMCP:
             "show_window": "no",
             "open_note": "no",
             "selected": "no",
-            "pin": "no",
+            # Removed "pin": "no" to preserve existing pin status
             "edit": "no",
             "x-success": f"xfwder://{uds.stem}/{req_id}/success",
             "x-error": f"xfwder://{uds.stem}/{req_id}/error",
