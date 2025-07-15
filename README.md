@@ -78,18 +78,18 @@ Refer to Bear's [X-callback-url Scheme documentation](https://bear.app/faq/x-cal
 
 - [x] /open-note
 - [x] /create
-- [x] /add-text (partially, via the replace_note method)
+- [x] /add-text (via replace_note, append_to_note, and insert_at_line methods)
 - [ ] /add-file
 - [x] /tags
 - [x] /open-tag
-- [x] /rename-tag
-- [x] /delete-tag
-- [x] /trash
-- [x] /archive
-- [x] /untagged
+- [ ] /rename-tag
+- [ ] /delete-tag
+- [ ] /trash
+- [ ] /archive
+- [ ] /untagged
 - [x] /todo
 - [x] /today
-- [x] /locked
+- [ ] /locked
 - [x] /search
 - [x] /grab-url
 
