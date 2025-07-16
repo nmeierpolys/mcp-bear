@@ -43,3 +43,6 @@ async def test_list_tools(mcp_client_session: ClientSession) -> None:
     assert "replace_note" in tools
     assert "append_to_note" in tools
     assert "insert_at_line" in tools
+    assert "insert_before_text" in tools
+    assert "insert_after_text" in tools
+    assert "get_editing_strategy_advice" in tools

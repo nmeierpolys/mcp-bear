@@ -392,6 +392,12 @@ def server(token: str, uds: Path) -> FastMCP:
         STRICT MATCHING: Requires exact match of anchor_text. Returns error if not found or 
         if multiple matches exist to avoid ambiguity.
         
+        FORMATTING: Text is inserted literally before anchor_text. For new lines, paragraphs, 
+        or list items, include newline characters in new_text. Examples:
+        - New paragraph: new_text="New paragraph content\\n\\n"
+        - New list item: new_text="  * New bullet point\\n"
+        - Same line: new_text="prefix text "
+        
         RETURNS: JSON string with metadata: {"status": "success", "affected_lines": N, "preview": "..."}"""
         # Read the current note content
         current_content = await open_note(ctx, id=id, title=title)
@@ -439,18 +445,23 @@ def server(token: str, uds: Path) -> FastMCP:
         old_lines = current_content.split("\n")
         new_lines = new_content.split("\n")
         
-        # Find the line where insertion occurred
+        # Find the line where insertion occurred in the NEW content
         anchor_line = -1
-        for i, line in enumerate(old_lines):
+        for i, line in enumerate(new_lines):
             if anchor_text in line:
                 anchor_line = i
                 break
         
         # Generate preview (±5 lines around insertion point)
-        preview_start = max(0, anchor_line - 5)
-        preview_end = min(len(new_lines), anchor_line + 6)
-        preview_lines = new_lines[preview_start:preview_end]
-        preview = "\n".join(preview_lines)
+        if anchor_line >= 0:
+            preview_start = max(0, anchor_line - 5)
+            preview_end = min(len(new_lines), anchor_line + 6)
+            preview_lines = new_lines[preview_start:preview_end]
+            preview = "\n".join(preview_lines)
+        else:
+            # Fallback: show first 10 lines if anchor not found
+            preview_lines = new_lines[:10]
+            preview = "\n".join(preview_lines)
 
         # Return metadata instead of full content
         metadata = {
@@ -478,6 +489,12 @@ def server(token: str, uds: Path) -> FastMCP:
         
         STRICT MATCHING: Requires exact match of anchor_text. Returns error if not found or 
         if multiple matches exist to avoid ambiguity.
+        
+        FORMATTING: Text is inserted literally after anchor_text. For new lines, paragraphs, 
+        or list items, include newline characters in new_text. Examples:
+        - New paragraph: new_text="\\n\\nNew paragraph content"
+        - New list item: new_text="\\n  * New bullet point"
+        - Same line: new_text=" additional text"
         
         RETURNS: JSON string with metadata: {"status": "success", "affected_lines": N, "preview": "..."}"""
         # Read the current note content
@@ -526,18 +543,23 @@ def server(token: str, uds: Path) -> FastMCP:
         old_lines = current_content.split("\n")
         new_lines = new_content.split("\n")
         
-        # Find the line where insertion occurred
+        # Find the line where insertion occurred in the NEW content
         anchor_line = -1
-        for i, line in enumerate(old_lines):
+        for i, line in enumerate(new_lines):
             if anchor_text in line:
                 anchor_line = i
                 break
         
         # Generate preview (±5 lines around insertion point)
-        preview_start = max(0, anchor_line - 5)
-        preview_end = min(len(new_lines), anchor_line + 6)
-        preview_lines = new_lines[preview_start:preview_end]
-        preview = "\n".join(preview_lines)
+        if anchor_line >= 0:
+            preview_start = max(0, anchor_line - 5)
+            preview_end = min(len(new_lines), anchor_line + 6)
+            preview_lines = new_lines[preview_start:preview_end]
+            preview = "\n".join(preview_lines)
+        else:
+            # Fallback: show first 10 lines if anchor not found
+            preview_lines = new_lines[:10]
+            preview = "\n".join(preview_lines)
 
         # Return metadata instead of full content
         metadata = {
